@@ -1,0 +1,40 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # ports:
+    #   - '5001:5001'
+    # cpus: "2.5"
+    environment:
+      - REDIS_HOST=redis
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.routers.redis-demo-http.rule=Host(`redis-demo-pupa.kalinets.com`)
+      - traefik.http.routers.redis-demo-http.entrypoints=http
+      - traefik.http.routers.redis-demo-http.middlewares=https-redirect
+      - traefik.http.routers.redis-demo-https.rule=Host(`redis-demo-pupa.kalinets.com`)
+      - traefik.http.routers.redis-demo-https.entrypoints=https
+      - traefik.http.routers.redis-demo-https.tls=true
+      - traefik.http.routers.redis-demo-https.tls.certresolver=le
+      - traefik.http.services.redis-demo.loadbalancer.server.port=5001
+      - traefik.http.middlewares.test-ratelimit.ratelimit.average=10
+      - traefik.http.middlewares.test-ratelimit.ratelimit.burst=20
+    # networks:
+    #   traefik-public:
+  redis:
+    image: 'bitnami/redis:latest'
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    # make it available on the host machine
+    ports:
+      - '6379:6379'
+    # networks:
+    #   traefik-public:
+    # networks:
+    #   - app-tier
+# networks:
+#   traefik-public:
+#     external: true
