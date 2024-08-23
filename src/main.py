@@ -1,5 +1,5 @@
 from fasthtml import common as ft
-from fasthtml.starlette import FormData, RedirectResponse, Request
+from fasthtml.starlette import FormData, RedirectResponse, Request, Response
 from redis.asyncio.client import Redis
 from icecream import ic
 from itertools import chain
@@ -19,11 +19,11 @@ def change_rows(rows: int, cols: int):
     return get_bingo_grid(cols, rows)
 
 
-def get_row(cols, control, row):
+def get_row(cols, control, current_row):
     r = [
         ft.Div(
             ft.Div(
-                control((row - 1) * cols + i),
+                control((current_row - 1) * cols + i),
                 cls="box",
                 style="background-color: green;",
             ),
@@ -37,8 +37,8 @@ def get_row(cols, control, row):
 def create_bingo_inpput(i: int):
     return (
         ft.Input(
-            name="item",
             type="text",
+            name="item",
             cls="box",
             style="background-color: green; color: white",
         ),
@@ -55,7 +55,6 @@ def create_bingo_text(items):
 def get_bingo_grid(cols=2, rows=2, control_factory=create_bingo_inpput):
     my_rows = [get_row(cols, control_factory, r) for r in range(rows)]
     my_rows = list(chain.from_iterable(my_rows))
-    # ic(my_rows)
     divs = ft.Div(
         *my_rows,
         cls="row",
@@ -68,45 +67,98 @@ def get_bingo_grid(cols=2, rows=2, control_factory=create_bingo_inpput):
 @rt("/")
 def get():
     form = ft.Form(
-        ft.Input(
-            name="cols",
-            hx_target="#items",
-            hx_post="/change_rows",
-            hx_trigger="change",
-        ),
-        ft.Input(
-            name="rows",
-            hx_target="#items",
-            hx_post="/change_rows",
-            hx_trigger="change",
-        ),
+        ft.Group(_i("cols"), ft.P("X", style="padding: 10px"), _i("rows")),
         ft.Div(get_bingo_grid(), id="items", cls="row"),
         ft.Button("Create"),
         hx_post="/create_template",
     )
-    return ft.Div(ft.P("Hello World!"), form)
+    return ft.Main(ft.Div(form, style="padding: 16px;"), title="sdfds")
 
 
 @rt("/create_template", methods=["POST"])
 async def post_create_template(cols: int, rows: int, request: Request):
     form_data = await request.form()
     items = form_data.getlist("item")
-    template_id = await create_template(
+    template_id = await create_template_in_db(
         cols=cols,
         rows=rows,
         items=items,
     )
-    return RedirectResponse(f"/template/{template_id}")
-    # return template_id
+    return Response(
+        status_code=200, headers={"HX-Redirect": f"/template/{template_id}"}
+    )
 
 
 @rt("/template/{template_id}")
 async def get_template_route(template_id: int):
-    template = await get_template(template_id)
+    template = await get_template_from_db(template_id)
     items = template["items"]
-    return ft.Div(
+    return ft.Container(
+        ft.P(f"Template {template_id}"),
+        ft.A("Back", href="/"),
         get_bingo_grid(template["cols"], template["rows"], create_bingo_text(items)),
+        ft.Button("Create Bingo", hx_post=f"/create_bingo?template_id={template_id}"),
     )
+
+
+def create_bingo_text2(items, bingo_id, selected_items):
+    def _f(i: int):
+        color = "green" if i in selected_items else "red"
+        return ft.P(
+            items[i],
+            cls="box",
+            style=f"background-color: {color}; color: white",
+            hx_trigger="click",
+            hx_post=f"/trigger?id={i}&bingo_id={bingo_id}",
+            hx_target="#grid",
+        )
+
+    return _f
+
+
+@rt("/trigger", methods=["POST"])
+async def post_trigger(request: Request, id: int, bingo_id: str):
+    await toggle_bingo_in_db(bingo_id, id)
+    return await _get_edit_grid(bingo_id)
+
+
+async def _get_edit_grid(bingo_id):
+    bingo = await get_bingo_from_db(bingo_id)
+    items = bingo["items"]
+    selected_items = bingo["selected_items"]
+    return get_bingo_grid(
+        bingo["cols"],
+        bingo["rows"],
+        create_bingo_text2(items, bingo_id, selected_items),
+    )
+
+
+# Template 687
+# bingo 153
+
+
+@rt("/edit_bingo")
+async def edit_bingo(bingo_id: str):
+    grid = await _get_edit_grid(bingo_id)
+    return ft.Container(
+        grid,
+        id="grid",
+    )
+
+
+@rt("/create_bingo", methods=["POST"])
+async def post_create_bingo(template_id: int, request: Request):
+    bingo_id = await create_bingo_from_template_in_db(template_id, [])
+    return Response(
+        status_code=200, headers={"HX-Redirect": f"/edit_bingo?bingo_id={bingo_id}"}
+    )
+
+    # form_data = await request.form()
+    # # selected_items = form_data.getlist("item")
+    # bingo_id = await create_bingo_from_template_in_db(template_id, selected_items)
+    # return Response(
+    #     status_code=200, headers={"HX-Redirect": f"/bingo/{bingo_id}"}
+    # )
 
 
 ft.serve()
@@ -114,11 +166,16 @@ ft.serve()
 db = Redis(host="localhost", port=6379, decode_responses=True)
 
 
-async def get_template(template_id):
-    template = await db.hgetall(f"template:{template_id}")
+async def get_template_items(template_id):
     template_items = await db.lrange(f"template_items:{template_id}", 0, -1)
     # TODO: fix reverse
     template_items.reverse()
+    return template_items
+
+
+async def get_template_from_db(template_id):
+    template = await db.hgetall(f"template:{template_id}")
+    template_items = await get_template_items(template_id)
     return {
         "cols": int(template["cols"]),
         "rows": int(template["rows"]),
@@ -126,7 +183,7 @@ async def get_template(template_id):
     }
 
 
-async def create_template(cols, rows, items):
+async def create_template_in_db(cols, rows, items):
     template_id = await db.incr("template_id")
     await db.hmset(
         f"template:{template_id}",
@@ -137,3 +194,68 @@ async def create_template(cols, rows, items):
     )
     await db.lpush(f"template_items:{template_id}", *items)
     return template_id
+
+
+def _i(i):
+    return ft.Input(
+        value="2",
+        name=i,
+        hx_target="#items",
+        hx_post="/change_rows",
+        hx_trigger="change",
+        type="number",
+        min="2",
+        max="5",
+    )
+
+
+async def create_bingo_from_template_in_db(template_id, selected_items):
+    bingo_id = await db.incr("bingo_id")
+    bingo_key = f"bingo:{bingo_id}"
+    selected_items = ",".join(map(str, selected_items))
+    template = await get_template_from_db(template_id)
+    await db.hset(
+        bingo_key,
+        mapping={
+            "template_id": template_id,
+            "selected_items": selected_items,
+            "cols": template["cols"],
+            "rows": template["rows"],
+        },
+    )
+    return bingo_id
+
+
+async def get_bingo_from_db(bingo_id):
+    # bingo_id = await db.incr("bingo_id")
+    bingo_key = f"bingo:{bingo_id}"
+    db_bingo = await db.hgetall(bingo_key)
+    # TODO: fix spagetthi
+    selected_items = (
+        db_bingo["selected_items"].split(",")
+        if db_bingo["selected_items"] != ""
+        else []
+    )
+    # ic(selected_items)
+    # filter out empty strings
+    selected_items = list(filter(None, selected_items))
+    items = await get_template_items(db_bingo["template_id"])
+    return {
+        "id": bingo_id,
+        "items": items,
+        "selected_items": list(map(int, selected_items)) if selected_items else [],
+        "cols": int(db_bingo["cols"]),
+        "rows": int(db_bingo["rows"]),
+    }
+
+
+async def toggle_bingo_in_db(bingo_id, item):
+    bingo_key = f"bingo:{bingo_id}"
+    db_bingo = await db.hgetall(bingo_key)
+    selected_items = db_bingo["selected_items"].split(",")
+    if str(item) in selected_items:
+        selected_items.remove(str(item))
+    else:
+        selected_items.append(str(item))
+    selected_items = ",".join(selected_items)
+    await db.hset(bingo_key, "selected_items", selected_items)
