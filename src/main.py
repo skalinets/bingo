@@ -1,7 +1,8 @@
 from fasthtml import common as ft
-from fasthtml.starlette import FormData, RedirectResponse, Request, Response
+from fasthtml.starlette import Request, Response
 from redis.asyncio.client import Redis
-from icecream import ic
+
+# from icecream import ic
 from itertools import chain
 
 gridlink = ft.Link(
@@ -188,7 +189,7 @@ async def create_template_in_db(cols, rows, items):
     template_id = await db.incr("template_id")
     await db.hset(
         f"template:{template_id}",
-        mapping = {
+        mapping={
             "cols": cols,
             "rows": rows,
         },
@@ -213,13 +214,13 @@ def _i(i):
 async def create_bingo_from_template_in_db(template_id, selected_items):
     bingo_id = await db.incr("bingo_id")
     bingo_key = f"bingo:{bingo_id}"
-    selected_items = ",".join(map(str, selected_items))
+    sel_items_key = f"selected_items:{bingo_id}"
+    await db.sadd(sel_items_key, *selected_items)
     template = await get_template_from_db(template_id)
     await db.hset(
         bingo_key,
         mapping={
             "template_id": template_id,
-            "selected_items": selected_items,
             "cols": template["cols"],
             "rows": template["rows"],
         },
@@ -228,35 +229,20 @@ async def create_bingo_from_template_in_db(template_id, selected_items):
 
 
 async def get_bingo_from_db(bingo_id):
-    # bingo_id = await db.incr("bingo_id")
     bingo_key = f"bingo:{bingo_id}"
     db_bingo = await db.hgetall(bingo_key)
-    # TODO: fix spagetthi
-    selected_items = (
-        db_bingo["selected_items"].split(",")
-        if db_bingo["selected_items"] != ""
-        else []
-    )
-    # ic(selected_items)
-    # filter out empty strings
-    selected_items = list(filter(None, selected_items))
     items = await get_template_items(db_bingo["template_id"])
+    selected_items = set(map(int, await db.smembers(f"selected_items:{bingo_id}")))
     return {
         "id": bingo_id,
         "items": items,
-        "selected_items": list(map(int, selected_items)) if selected_items else [],
+        "selected_items": selected_items,
         "cols": int(db_bingo["cols"]),
         "rows": int(db_bingo["rows"]),
     }
 
 
 async def toggle_bingo_in_db(bingo_id, item):
-    bingo_key = f"bingo:{bingo_id}"
-    db_bingo = await db.hgetall(bingo_key)
-    selected_items = db_bingo["selected_items"].split(",")
-    if str(item) in selected_items:
-        selected_items.remove(str(item))
-    else:
-        selected_items.append(str(item))
-    selected_items = ",".join(selected_items)
-    await db.hset(bingo_key, "selected_items", selected_items)
+    has_member = await db.sismember(f"selected_items:{bingo_id}", item)
+    func = [db.sadd, db.srem][has_member]
+    await func(f"selected_items:{bingo_id}", item)

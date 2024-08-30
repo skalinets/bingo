@@ -69,7 +69,7 @@ async def test_create_bingo_from_template():
         "id": bingo_id,
         "cols": 2,
         "rows": 2,
-        "selected_items": [0, 3],
+        "selected_items": {0, 3},
         "items": ["A", "B", "C", "D"],
     }
 
@@ -93,4 +93,4 @@ async def test_toggle_item_in_bingo():
     await toggle_bingo_in_db(bingo_id, 1)
     await toggle_bingo_in_db(bingo_id, 3)
     bingo = await get_bingo_from_db(bingo_id)
-    assert [0, 1] == bingo["selected_items"]
+    assert {0, 1} == bingo["selected_items"]
