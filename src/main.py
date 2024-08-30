@@ -164,6 +164,7 @@ async def post_create_bingo(template_id: int, request: Request):
 ft.serve()
 
 db = Redis(host="localhost", port=6379, decode_responses=True)
+# await db.
 
 
 async def get_template_items(template_id):
@@ -185,9 +186,9 @@ async def get_template_from_db(template_id):
 
 async def create_template_in_db(cols, rows, items):
     template_id = await db.incr("template_id")
-    await db.hmset(
+    await db.hset(
         f"template:{template_id}",
-        {
+        mapping = {
             "cols": cols,
             "rows": rows,
         },
