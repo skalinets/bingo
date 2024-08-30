@@ -1,12 +1,24 @@
-# create dockerfile for python app
-FROM python:3.12
+# Install uv
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
+# Change the working directory to the `app` directory
 WORKDIR /app
 
-COPY requirements.txt requirements.txt
+# Copy the lockfile and `pyproject.toml` into the image
+ADD uv.lock /app/uv.lock
+ADD pyproject.toml /app/pyproject.toml
 
-RUN pip install -r requirements.txt --no-cache-dir
+# Install dependencies
+RUN uv sync --frozen --no-install-project
 
-COPY . .
+# Copy the project into the image
+ADD . /app
 
-CMD ["python", "main.py"]
+# Sync the project
+RUN uv sync --frozen
+
+# RUN source ./.venv/bin/activate
+RUN uv run ./src/main.py
+
+# CMD ["python", "main.py"]

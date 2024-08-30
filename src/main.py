@@ -119,6 +119,7 @@ def create_bingo_text2(items, bingo_id, selected_items):
 
 @rt("/trigger", methods=["POST"])
 async def post_trigger(request: Request, id: int, bingo_id: str):
+    print("sadfasdfasdfasdf")
     await toggle_bingo_in_db(bingo_id, id)
     return await _get_edit_grid(bingo_id)
 
@@ -149,23 +150,15 @@ async def edit_bingo(bingo_id: str):
 
 @rt("/create_bingo", methods=["POST"])
 async def post_create_bingo(template_id: int, request: Request):
-    bingo_id = await create_bingo_from_template_in_db(template_id, [])
+    bingo_id = await create_bingo_from_template_in_db(template_id)
     return Response(
         status_code=200, headers={"HX-Redirect": f"/edit_bingo?bingo_id={bingo_id}"}
     )
-
-    # form_data = await request.form()
-    # # selected_items = form_data.getlist("item")
-    # bingo_id = await create_bingo_from_template_in_db(template_id, selected_items)
-    # return Response(
-    #     status_code=200, headers={"HX-Redirect": f"/bingo/{bingo_id}"}
-    # )
 
 
 ft.serve()
 
 db = Redis(host="localhost", port=6379, decode_responses=True)
-# await db.
 
 
 async def get_template_items(template_id):
@@ -211,11 +204,11 @@ def _i(i):
     )
 
 
-async def create_bingo_from_template_in_db(template_id, selected_items):
+async def create_bingo_from_template_in_db(template_id):
     bingo_id = await db.incr("bingo_id")
     bingo_key = f"bingo:{bingo_id}"
-    sel_items_key = f"selected_items:{bingo_id}"
-    await db.sadd(sel_items_key, *selected_items)
+    # sel_items_key = f"selected_items:{bingo_id}"
+    # await db.sadd(sel_items_key, *selected_items)
     template = await get_template_from_db(template_id)
     await db.hset(
         bingo_key,
