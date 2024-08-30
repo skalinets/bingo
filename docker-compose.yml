@@ -3,11 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # ports:
-    #   - '5001:5001'
-    # cpus: "2.5"
+    ports:
+      - '5001:5001'
     environment:
-      - REDIS_HOST=redis
+      - REDIS_URL=redis://redis:6379/0
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public

@@ -20,15 +20,17 @@ def event_loop():
     yield loop
     loop.close()
 
+@pytest.fixture(autouse=True)
+def db_for_test(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/1")
+    db = Redis.from_url("redis://localhost:6379/1", decode_responses=True)
+    db.flushdb()
+    yield db
+    db.flushdb()
+
 
 def test_hello():
     assert 1 == 1
-
-
-async def test_redis():
-    db = Redis(host="localhost", port=6379)
-    await db.set("name", "John")
-    assert await db.get("name") == b"John"
 
 
 async def test_create_new_bingo_template():

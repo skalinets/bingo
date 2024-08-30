@@ -1,6 +1,7 @@
 from fasthtml import common as ft
 from fasthtml.starlette import Request, Response
 from redis.asyncio.client import Redis
+from os import environ
 
 # from icecream import ic
 from itertools import chain
@@ -158,7 +159,9 @@ async def post_create_bingo(template_id: int, request: Request):
 
 ft.serve()
 
-db = Redis(host="localhost", port=6379, decode_responses=True)
+REDIS_URL = environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+db = Redis.from_url(REDIS_URL, decode_responses=True)
 
 
 async def get_template_items(template_id):

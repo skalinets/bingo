@@ -19,6 +19,6 @@ ADD . /app
 RUN uv sync --frozen
 
 # RUN source ./.venv/bin/activate
-RUN uv run ./src/main.py
+CMD ["uv",  "run",  "./src/main.py"]
 
 # CMD ["python", "main.py"]
