@@ -23,6 +23,18 @@ services:
       - traefik.http.middlewares.test-ratelimit.ratelimit.burst=20
     # networks:
     #   traefik-public:
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /app
+          # Exclude the project virtual environment
+          ignore:
+            - .venv/
+
+        # Rebuild the image on changes to the `pyproject.toml`
+        - action: rebuild
+          path: ./pyproject.toml
   redis:
     image: 'bitnami/redis:latest'
     environment:

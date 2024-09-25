@@ -3,7 +3,7 @@ from fasthtml.starlette import Request, Response
 from redis.asyncio.client import Redis
 from os import environ
 
-# from icecream import ic
+from icecream import ic
 from itertools import chain
 
 gridlink = ft.Link(
@@ -62,6 +62,7 @@ def get_bingo_grid(cols=2, rows=2, control_factory=create_bingo_inpput):
         cls="row",
         style="background-color: #fbf;",
     )
+    ic(divs)
 
     return ft.Div(*divs, cls="row", style="color: #fff;")
 
@@ -74,6 +75,7 @@ def get():
         ft.Button("Create"),
         hx_post="/create_template",
     )
+
     return ft.Main(ft.Div(form, style="padding: 16px;"), title="sdfds")
 
 
@@ -98,8 +100,10 @@ async def get_template_route(template_id: int):
     return ft.Container(
         ft.P(f"Template {template_id}"),
         ft.A("Back", href="/"),
-        get_bingo_grid(template["cols"], template["rows"], create_bingo_text(items)),
-        ft.Button("Create Bingo", hx_post=f"/create_bingo?template_id={template_id}"),
+        get_bingo_grid(template["cols"], template["rows"],
+                       create_bingo_text(items)),
+        ft.Button("Create Bingo",
+                  hx_post=f"/create_bingo?template_id={template_id}"),
     )
 
 
@@ -143,10 +147,46 @@ async def _get_edit_grid(bingo_id):
 @rt("/edit_bingo")
 async def edit_bingo(bingo_id: str):
     grid = await _get_edit_grid(bingo_id)
-    return ft.Container(
+    container = ft.Container(
         grid,
         id="grid",
     )
+    param_name = "bingo_id"
+    button_text = "Publish"
+    action = "/publish_bingo"
+    form = _post_button(param_name, bingo_id, button_text, action)
+    return ft.Titled("Edit Bingo", container, form)
+
+
+def _post_button(param_name, value, button_text, action):
+    form = ft.Form(
+        ft.Hidden(name=param_name, value=value),
+        ft.Button(button_text),
+        action=action,
+        method="POST",
+    )
+    return form
+
+
+@rt("/publish_bingo", methods=["POST"])
+async def publish_bingo(bingo_id: str):
+    return ft.RedirectResponse(f"/show_bingo/{bingo_id}")
+
+
+@rt("/show_bingo/{bingo_id}")
+async def show_bingo(bingo_id: str):
+    bingo = await get_bingo_from_db(bingo_id)
+    items = bingo["items"]
+    selected_items = bingo["selected_items"]
+    grid = get_bingo_grid(
+        bingo["cols"],
+        bingo["rows"],
+        create_bingo_text2(items, bingo_id, selected_items),
+    )
+    button = _post_button(
+        "template_id", bingo["template_id"], "Створіть Власне Бінго", "/create_bingo"
+    )
+    return ft.Titled("Show Bingo", grid, button)
 
 
 @rt("/create_bingo", methods=["POST"])
@@ -154,6 +194,8 @@ async def post_create_bingo(template_id: int, request: Request):
     bingo_id = await create_bingo_from_template_in_db(template_id)
     return Response(
         status_code=200, headers={"HX-Redirect": f"/edit_bingo?bingo_id={bingo_id}"}
+    ) if request.headers.get("HX-Trigger") else ft.RedirectResponse(
+        f"/edit_bingo?bingo_id={bingo_id}"
     )
 
 
@@ -174,6 +216,7 @@ async def get_template_items(template_id):
 async def get_template_from_db(template_id):
     template = await db.hgetall(f"template:{template_id}")
     template_items = await get_template_items(template_id)
+    ic(template_items)
     return {
         "cols": int(template["cols"]),
         "rows": int(template["rows"]),
@@ -227,7 +270,8 @@ async def create_bingo_from_template_in_db(template_id):
 async def get_bingo_from_db(bingo_id):
     bingo_key = f"bingo:{bingo_id}"
     db_bingo = await db.hgetall(bingo_key)
-    items = await get_template_items(db_bingo["template_id"])
+    template_id = db_bingo["template_id"]
+    items = await get_template_items(template_id)
     selected_items = set(map(int, await db.smembers(f"selected_items:{bingo_id}")))
     return {
         "id": bingo_id,
@@ -235,6 +279,7 @@ async def get_bingo_from_db(bingo_id):
         "selected_items": selected_items,
         "cols": int(db_bingo["cols"]),
         "rows": int(db_bingo["rows"]),
+        "template_id": template_id,
     }
 
 
