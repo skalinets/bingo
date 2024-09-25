@@ -25,6 +25,9 @@
 
 ## Інші посилання
 
+Буде дуже круто, якщо ви проглянете ресурси нижче, а якщо підпишетесь,
+то буду безмежно вдячний. 
+
 Записи епізодів на YouTube:
 
 - [перший](https://www.youtube.com/watch?v=_xfaus8dThg)
@@ -33,8 +36,11 @@
 - четвертий в процесі
 
 Канал на twitch: https://www.twitch.tv/skalinets
+
 Twitter: https://x.com/skalinets
+
 Мій канал ТГ: https://t.me/mamkin_architect
+
 Супер чат для айтішників: https://t.me/+rCuzYKkwfK4wNjQy
 
 
