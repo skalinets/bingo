@@ -100,10 +100,8 @@ async def get_template_route(template_id: int):
     return ft.Container(
         ft.P(f"Template {template_id}"),
         ft.A("Back", href="/"),
-        get_bingo_grid(template["cols"], template["rows"],
-                       create_bingo_text(items)),
-        ft.Button("Create Bingo",
-                  hx_post=f"/create_bingo?template_id={template_id}"),
+        get_bingo_grid(template["cols"], template["rows"], create_bingo_text(items)),
+        ft.Button("Create Bingo", hx_post=f"/create_bingo?template_id={template_id}"),
     )
 
 
@@ -192,10 +190,12 @@ async def show_bingo(bingo_id: str):
 @rt("/create_bingo", methods=["POST"])
 async def post_create_bingo(template_id: int, request: Request):
     bingo_id = await create_bingo_from_template_in_db(template_id)
-    return Response(
-        status_code=200, headers={"HX-Redirect": f"/edit_bingo?bingo_id={bingo_id}"}
-    ) if request.headers.get("HX-Trigger") else ft.RedirectResponse(
-        f"/edit_bingo?bingo_id={bingo_id}"
+    return (
+        Response(
+            status_code=200, headers={"HX-Redirect": f"/edit_bingo?bingo_id={bingo_id}"}
+        )
+        if request.headers.get("HX-Trigger")
+        else ft.RedirectResponse(f"/edit_bingo?bingo_id={bingo_id}")
     )
 
 
