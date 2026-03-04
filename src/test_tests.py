@@ -1,7 +1,7 @@
-from redis.asyncio.client import Redis
+import asyncio
 
 import pytest
-import asyncio
+from redis.asyncio.client import Redis
 
 from main import (
     create_bingo_from_template_in_db,
@@ -11,6 +11,7 @@ from main import (
     toggle_bingo_in_db,
 )
 
+
 @pytest.fixture(scope="session")
 def event_loop():
     try:
@@ -19,6 +20,7 @@ def event_loop():
         loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
 
 @pytest.fixture(autouse=True)
 def db_for_test(monkeypatch):

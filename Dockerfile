@@ -9,16 +9,13 @@ WORKDIR /app
 ADD uv.lock /app/uv.lock
 ADD pyproject.toml /app/pyproject.toml
 
-# Install dependencies
-RUN uv sync --frozen --no-install-project
+# Install production dependencies only
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Copy the project into the image
 ADD . /app
 
-# Sync the project
-RUN uv sync --frozen
+# Sync the project (production only)
+RUN uv sync --frozen --no-dev
 
-# RUN source ./.venv/bin/activate
-CMD ["uv",  "run",  "./src/main.py"]
-
-# CMD ["python", "main.py"]
+CMD ["uv", "run", "./src/main.py"]
