@@ -1,7 +1,8 @@
 import base64
-import json
+import math
 import secrets
 from os import environ
+from urllib.parse import quote, unquote
 
 from fasthtml import common as ft
 from fasthtml.core import Beforeware
@@ -199,10 +200,6 @@ body {
     transform: rotate(-22deg);
 }
 
-.cell-input-wrapper {
-    padding: 0;
-}
-
 .cell-input {
     background-color: var(--cell-unselected);
     border: 2px solid var(--border-standard);
@@ -269,72 +266,33 @@ a.btn-primary {
     background-color: var(--bg-elevated);
 }
 
-.grid-size-selector {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 24px;
-}
-
-.stepper {
-    display: inline-flex;
-    flex-direction: row;
-    gap: 0;
-}
-
-.stepper-btn {
-    width: 44px;
-    height: 44px;
+.items-textarea {
+    width: 100%;
+    max-width: 480px;
+    min-height: 160px;
+    background-color: var(--cell-unselected);
     border: 2px solid var(--border-standard);
-    background: var(--bg-card);
-    font-family: 'Inter', sans-serif;
+    border-radius: 8px;
+    padding: 12px;
+    font-family: 'Caveat', cursive;
     font-size: 20px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    padding: 0;
+    font-weight: 700;
     color: var(--text-primary);
-    transition: background-color 0.15s ease;
+    outline: none;
+    resize: vertical;
+    margin-bottom: 16px;
 }
 
-.stepper-btn:first-child {
-    border-radius: 4px 0 0 4px;
+.items-textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(214, 48, 49, 0.15);
 }
 
-.stepper-btn:last-child {
-    border-radius: 0 4px 4px 0;
-}
-
-.stepper-btn:hover:not(:disabled) {
-    background: var(--bg-elevated);
-}
-
-.stepper-btn:disabled {
-    opacity: 0.3;
-    cursor: default;
-}
-
-.stepper-val {
-    width: 44px;
-    height: 44px;
-    border-top: 2px solid var(--border-standard);
-    border-bottom: 2px solid var(--border-standard);
-    background: var(--cell-unselected);
-    font-family: 'Permanent Marker', cursive;
-    font-size: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    user-select: none;
-}
-
-.grid-size-separator {
+.preview-info {
     font-family: 'Inter', sans-serif;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-tertiary);
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
 }
 """)
 
@@ -521,7 +479,7 @@ bware = Beforeware(
         r"/register",
         r"/register/begin",
         r"/register/complete",
-        r"/change_rows",
+        r"/preview_grid",
         r"/template/\d+",
         r"/show_bingo/\d+",
         r"/create_bingo",
@@ -542,11 +500,16 @@ app, rt = ft.fast_app(
 )
 
 
-def create_bingo_inpput(i: int):
-    return ft.Div(
-        ft.Input(type="text", name="item", cls="cell-input", placeholder=f"#{i + 1}"),
-        cls="bingo-cell cell-input-wrapper",
-    )
+def _parse_bingo_items(text):
+    items = [line.strip() for line in text.splitlines() if line.strip()]
+    if not items:
+        return [], 0
+    side = max(2, min(5, math.ceil(math.sqrt(len(items)))))
+    total = side * side
+    items = items[:total]
+    while len(items) < total:
+        items.append("")
+    return items, side
 
 
 def create_bingo_text(items):
@@ -589,7 +552,7 @@ def create_bingo_cell_show(items, selected_items):
     return _f
 
 
-def get_bingo_grid(cols=2, rows=2, control_factory=create_bingo_inpput):
+def get_bingo_grid(cols=2, rows=2, control_factory=None):
     total = cols * rows
     cells = [control_factory(i) for i in range(total)]
     return ft.Div(
@@ -600,11 +563,24 @@ def get_bingo_grid(cols=2, rows=2, control_factory=create_bingo_inpput):
     )
 
 
-@rt("/change_rows", methods=["POST"])
-def change_rows(rows: int, cols: int):
-    cols = max(2, min(5, cols or 2))
-    rows = max(2, min(5, rows or 2))
-    return _get_grid_area(cols, rows)
+@rt("/preview_grid", methods=["POST"])
+async def preview_grid(request: Request):
+    form_data = await request.form()
+    items_text = form_data.get("items_text", "")
+    items, side = _parse_bingo_items(items_text)
+    if not items:
+        return ft.Div(
+            ft.P("Введіть елементи (по одному на рядок)", cls="preview-info"),
+            id="preview-area",
+        )
+    return ft.Div(
+        ft.P(
+            f"{len([i for i in items if i])} елементів → {side}×{side} сітка",
+            cls="preview-info",
+        ),
+        get_bingo_grid(side, side, create_bingo_text(items)),
+        id="preview-area",
+    )
 
 
 @rt("/")
@@ -624,7 +600,18 @@ def get(session):
             style="position:absolute;top:16px;right:16px;",
         )
         form = ft.Form(
-            _get_grid_area(),
+            ft.Textarea(
+                name="items_text",
+                placeholder="Введіть елементи бінго\n(по одному на рядок)",
+                cls="items-textarea",
+                hx_post="/preview_grid",
+                hx_target="#preview-area",
+                hx_trigger="input changed delay:300ms",
+            ),
+            ft.Div(
+                ft.P("Введіть елементи (по одному на рядок)", cls="preview-info"),
+                id="preview-area",
+            ),
             ft.Button("Створити Шаблон", cls="btn-primary"),
             hx_post="/create_template",
         )
@@ -658,12 +645,15 @@ def get(session):
 
 
 @rt("/create_template", methods=["POST"])
-async def post_create_template(cols: int, rows: int, request: Request, session):
+async def post_create_template(request: Request, session):
     form_data = await request.form()
-    items = form_data.getlist("item")
+    items_text = form_data.get("items_text", "")
+    items, side = _parse_bingo_items(items_text)
+    if not items:
+        return Response("Введіть хоча б один елемент", status_code=400)
     template_id = await create_template_in_db(
-        cols=cols,
-        rows=rows,
+        cols=side,
+        rows=side,
         items=items,
         user_id=session.get("user_id"),
     )
@@ -862,7 +852,7 @@ async def post_register_begin(request: Request):
     ck = dict(httponly=True, max_age=300, samesite="lax")
     resp.set_cookie("webauthn_token", token, **ck)
     resp.set_cookie("webauthn_email", email, **ck)
-    resp.set_cookie("webauthn_display_name", display_name, **ck)
+    resp.set_cookie("webauthn_display_name", quote(display_name), **ck)
     return resp
 
 
@@ -870,9 +860,9 @@ async def post_register_begin(request: Request):
 async def post_register_complete(request: Request, session):
     token = request.cookies.get("webauthn_token")
     email = request.cookies.get("webauthn_email")
-    display_name = request.cookies.get("webauthn_display_name", email)
     if not token or not email:
         return Response("Сесію реєстрації не знайдено", status_code=400)
+    display_name = unquote(request.cookies.get("webauthn_display_name", email))
     challenge = await get_and_delete_challenge(token)
     if not challenge:
         return Response("Виклик прострочений", status_code=400)
@@ -1260,47 +1250,6 @@ REDIS_URL = environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 db = Redis.from_url(REDIS_URL, decode_responses=True)
 
-
-def _stepper(name, value, cols, rows):
-    other_name = "rows" if name == "cols" else "cols"
-    other_value = rows if name == "cols" else cols
-    return ft.Div(
-        ft.Button(
-            "\u2212",
-            cls="stepper-btn",
-            hx_post="/change_rows",
-            hx_target="#grid-area",
-            hx_swap="outerHTML",
-            hx_vals=json.dumps({name: max(2, value - 1), other_name: other_value}),
-            disabled=(value <= 2),
-        ),
-        ft.Span(str(value), cls="stepper-val"),
-        ft.Button(
-            "+",
-            cls="stepper-btn",
-            hx_post="/change_rows",
-            hx_target="#grid-area",
-            hx_swap="outerHTML",
-            hx_vals=json.dumps({name: min(5, value + 1), other_name: other_value}),
-            disabled=(value >= 5),
-        ),
-        cls="stepper",
-    )
-
-
-def _get_grid_area(cols=2, rows=2):
-    return ft.Div(
-        ft.Div(
-            _stepper("cols", cols, cols, rows),
-            ft.Span("\u00d7", cls="grid-size-separator"),
-            _stepper("rows", rows, cols, rows),
-            cls="grid-size-selector",
-        ),
-        get_bingo_grid(cols, rows),
-        ft.Hidden(name="cols", value=str(cols)),
-        ft.Hidden(name="rows", value=str(rows)),
-        id="grid-area",
-    )
 
 
 async def get_template_items(template_id):

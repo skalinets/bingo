@@ -4,6 +4,7 @@ import pytest
 from redis.asyncio.client import Redis
 
 from main import (
+    _parse_bingo_items,
     create_bingo_from_template_in_db,
     create_template_in_db,
     create_user_in_db,
@@ -249,7 +250,7 @@ def test_home_page_public(client):
 def test_create_template_requires_auth(client):
     resp = client.post(
         "/create_template",
-        data={"cols": "2", "rows": "2", "item": ["A", "B", "C", "D"]},
+        data={"items_text": "A\nB\nC\nD"},
         follow_redirects=False,
     )
     assert resp.status_code == 303
@@ -392,3 +393,298 @@ def test_logout_clears_session(client):
     resp = client.post("/logout", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers.get("location", "") == "/"
+
+
+def test_parse_bingo_items_4_items():
+    items, side = _parse_bingo_items("A\nB\nC\nD")
+    assert side == 2
+    assert items == ["A", "B", "C", "D"]
+
+
+def test_parse_bingo_items_5_items_padded():
+    items, side = _parse_bingo_items("A\nB\nC\nD\nE")
+    assert side == 3
+    assert len(items) == 9
+    assert items[:5] == ["A", "B", "C", "D", "E"]
+    assert items[5:] == ["", "", "", ""]
+
+
+def test_parse_bingo_items_9_items():
+    items, side = _parse_bingo_items("\n".join(f"item{i}" for i in range(9)))
+    assert side == 3
+    assert len(items) == 9
+
+
+def test_parse_bingo_items_26_capped():
+    items, side = _parse_bingo_items("\n".join(f"x{i}" for i in range(26)))
+    assert side == 5
+    assert len(items) == 25
+
+
+def test_parse_bingo_items_empty():
+    items, side = _parse_bingo_items("")
+    assert side == 0
+    assert items == []
+
+
+def test_parse_bingo_items_blank_lines():
+    items, side = _parse_bingo_items("A\n\n  \nB\nC\nD")
+    assert side == 2
+    assert items == ["A", "B", "C", "D"]
+
+
+def test_preview_grid_returns_html(client):
+    resp = client.post("/preview_grid", data={"items_text": "A\nB\nC\nD"})
+    assert resp.status_code == 200
+    assert "preview-area" in resp.text
+
+
+def test_preview_grid_empty_text(client):
+    resp = client.post("/preview_grid", data={"items_text": ""})
+    assert resp.status_code == 200
+    assert "preview-area" in resp.text
+    assert "grid" not in resp.text.lower() or "Введіть елементи" in resp.text
+
+
+def test_preview_grid_missing_field(client):
+    resp = client.post("/preview_grid", data={})
+    assert resp.status_code == 200
+    assert "preview-area" in resp.text
+
+
+# --- Unicode / non-ASCII edge cases ---
+
+
+def test_register_begin_unicode_display_name(client):
+    """The bug: Ukrainian display name in cookie caused latin-1 encode error."""
+    with (
+        patch("main.get_user_by_email", new_callable=AsyncMock) as m1,
+        patch("main.generate_registration_options") as m2,
+        patch("main.options_to_json") as m3,
+        patch("main.store_challenge", new_callable=AsyncMock),
+    ):
+        m1.return_value = None
+        mock_opts = MagicMock()
+        mock_opts.challenge = b"\x00" * 32
+        m2.return_value = mock_opts
+        m3.return_value = '{"challenge":"AAAA"}'
+        resp = client.post(
+            "/register/begin",
+            data={"email": "ukr@example.com", "display_name": "Тарас Шевченко"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/json"
+
+
+def test_register_begin_emoji_display_name(client):
+    with (
+        patch("main.get_user_by_email", new_callable=AsyncMock) as m1,
+        patch("main.generate_registration_options") as m2,
+        patch("main.options_to_json") as m3,
+        patch("main.store_challenge", new_callable=AsyncMock),
+    ):
+        m1.return_value = None
+        mock_opts = MagicMock()
+        mock_opts.challenge = b"\x00" * 32
+        m2.return_value = mock_opts
+        m3.return_value = '{"challenge":"AAAA"}'
+        resp = client.post(
+            "/register/begin",
+            data={"email": "emoji@example.com", "display_name": "User 🎲🎯"},
+        )
+        assert resp.status_code == 200
+
+
+def test_register_begin_cjk_display_name(client):
+    with (
+        patch("main.get_user_by_email", new_callable=AsyncMock) as m1,
+        patch("main.generate_registration_options") as m2,
+        patch("main.options_to_json") as m3,
+        patch("main.store_challenge", new_callable=AsyncMock),
+    ):
+        m1.return_value = None
+        mock_opts = MagicMock()
+        mock_opts.challenge = b"\x00" * 32
+        m2.return_value = mock_opts
+        m3.return_value = '{"challenge":"AAAA"}'
+        resp = client.post(
+            "/register/begin",
+            data={"email": "cjk@example.com", "display_name": "用户名"},
+        )
+        assert resp.status_code == 200
+
+
+async def test_create_user_unicode_display_name():
+    await create_user_in_db("ukr@example.com", "Тарас Шевченко")
+    user = await get_user_by_email("ukr@example.com")
+    assert user["display_name"] == "Тарас Шевченко"
+
+
+# --- Register edge cases ---
+
+
+def test_register_begin_empty_email(client):
+    resp = client.post(
+        "/register/begin",
+        data={"email": "", "display_name": "Nobody"},
+    )
+    assert resp.status_code == 400
+
+
+def test_register_begin_whitespace_email(client):
+    resp = client.post(
+        "/register/begin",
+        data={"email": "   ", "display_name": "Nobody"},
+    )
+    assert resp.status_code == 400
+
+
+def test_register_begin_duplicate_email(client):
+    with patch("main.get_user_by_email", new_callable=AsyncMock) as m1:
+        m1.return_value = {"id": "1", "email": "taken@example.com"}
+        resp = client.post(
+            "/register/begin",
+            data={"email": "taken@example.com", "display_name": "Dup"},
+        )
+        assert resp.status_code == 400
+
+
+def test_register_begin_empty_display_name_falls_back_to_email(client):
+    with (
+        patch("main.get_user_by_email", new_callable=AsyncMock) as m1,
+        patch("main.generate_registration_options") as m2,
+        patch("main.options_to_json") as m3,
+        patch("main.store_challenge", new_callable=AsyncMock),
+    ):
+        m1.return_value = None
+        mock_opts = MagicMock()
+        mock_opts.challenge = b"\x00" * 32
+        m2.return_value = mock_opts
+        m3.return_value = '{"challenge":"AAAA"}'
+        resp = client.post(
+            "/register/begin",
+            data={"email": "fallback@example.com", "display_name": ""},
+        )
+        assert resp.status_code == 200
+        # display_name should have fallen back to email
+        m2.assert_called_once()
+        call_kwargs = m2.call_args
+        assert call_kwargs.kwargs.get(
+            "user_display_name", call_kwargs[1].get("user_display_name")
+        ) == "fallback@example.com"
+
+
+def test_register_complete_missing_cookies(client):
+    resp = client.post(
+        "/register/complete",
+        json={"id": "cred", "rawId": "abc", "type": "public-key", "response": {}},
+    )
+    assert resp.status_code == 400
+
+
+def test_register_complete_expired_challenge(client):
+    with patch("main.get_and_delete_challenge", new_callable=AsyncMock) as m1:
+        m1.return_value = None
+        resp = client.post(
+            "/register/complete",
+            json={"id": "cred", "rawId": "abc", "type": "public-key", "response": {}},
+            cookies={
+                "webauthn_token": "tok",
+                "webauthn_email": "e@example.com",
+                "webauthn_display_name": "Name",
+            },
+        )
+        assert resp.status_code == 400
+
+
+# --- Login edge cases ---
+
+
+def test_login_begin_empty_email(client):
+    resp = client.post("/login/begin", data={"email": ""})
+    assert resp.status_code == 400
+
+
+def test_login_begin_whitespace_email(client):
+    resp = client.post("/login/begin", data={"email": "   "})
+    assert resp.status_code == 400
+
+
+def test_login_complete_missing_token(client):
+    resp = client.post(
+        "/login/complete",
+        json={"id": "cred", "rawId": "abc", "type": "public-key", "response": {}},
+    )
+    assert resp.status_code == 400
+
+
+def test_login_complete_expired_challenge(client):
+    with patch("main.get_and_delete_challenge", new_callable=AsyncMock) as m1:
+        m1.return_value = None
+        resp = client.post(
+            "/login/complete",
+            json={"id": "cred", "rawId": "abc", "type": "public-key", "response": {}},
+            cookies={"webauthn_token": "tok", "webauthn_email": "e@example.com"},
+        )
+        assert resp.status_code == 400
+
+
+def test_login_complete_unknown_credential(client):
+    with (
+        patch("main.get_and_delete_challenge", new_callable=AsyncMock) as m1,
+        patch("main.get_credential_by_id", new_callable=AsyncMock) as m2,
+    ):
+        m1.return_value = b"\x00" * 32
+        m2.return_value = None
+        resp = client.post(
+            "/login/complete",
+            json={
+                "id": "unknown", "rawId": "abc",
+                "type": "public-key", "response": {},
+            },
+            cookies={"webauthn_token": "tok", "webauthn_email": "e@example.com"},
+        )
+        assert resp.status_code == 400
+
+
+# --- Create template edge cases ---
+
+
+def test_create_template_empty_items(client):
+    """Creating a template with no items should fail, not create an empty template."""
+    import main
+
+    with patch.object(main.bware, "f", new_callable=AsyncMock, return_value=None):
+        resp = client.post(
+            "/create_template",
+            data={"items_text": ""},
+        )
+        assert resp.status_code == 400
+
+
+def test_create_template_whitespace_only_items(client):
+    import main
+
+    with patch.object(main.bware, "f", new_callable=AsyncMock, return_value=None):
+        resp = client.post(
+            "/create_template",
+            data={"items_text": "  \n\n  \n  "},
+        )
+        assert resp.status_code == 400
+
+
+# --- Recovery passkey edge cases ---
+
+
+def test_recover_passkey_begin_no_auth(client):
+    resp = client.post("/recover/passkey/begin", follow_redirects=False)
+    assert resp.status_code in (303, 401)
+
+
+def test_recover_passkey_complete_no_auth(client):
+    resp = client.post(
+        "/recover/passkey/complete",
+        json={"id": "cred", "rawId": "abc", "type": "public-key", "response": {}},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (303, 401)
