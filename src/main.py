@@ -119,7 +119,7 @@ body {
     font-size: 20px;
     font-weight: 700;
     line-height: 1.1;
-    word-break: break-word;
+    overflow-wrap: break-word;
     overflow: hidden;
     border: 2px solid var(--border-standard);
     transition: transform 0.1s ease, box-shadow 0.1s ease;
@@ -293,6 +293,51 @@ a.btn-primary {
     font-size: 14px;
     color: var(--text-secondary);
     margin-bottom: 16px;
+}
+
+.create-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    width: 100%;
+}
+
+.create-editor {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.create-preview {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+@media (min-width: 860px) {
+    .page-container {
+        max-width: 960px;
+    }
+    .create-layout {
+        flex-direction: row;
+        align-items: flex-start;
+    }
+    .create-editor {
+        flex: 0 0 auto;
+        width: 320px;
+        position: sticky;
+        top: 24px;
+    }
+    .create-preview {
+        flex: 1;
+        min-width: 0;
+    }
+    .items-textarea {
+        max-width: 100%;
+    }
 }
 """)
 
@@ -600,19 +645,31 @@ def get(session):
             style="position:absolute;top:16px;right:16px;",
         )
         form = ft.Form(
-            ft.Textarea(
-                name="items_text",
-                placeholder="Введіть елементи бінго\n(по одному на рядок)",
-                cls="items-textarea",
-                hx_post="/preview_grid",
-                hx_target="#preview-area",
-                hx_trigger="input changed delay:300ms",
-            ),
             ft.Div(
-                ft.P("Введіть елементи (по одному на рядок)", cls="preview-info"),
-                id="preview-area",
+                ft.Div(
+                    ft.Textarea(
+                        name="items_text",
+                        placeholder="Введіть елементи бінго\n(по одному на рядок)",
+                        cls="items-textarea",
+                        hx_post="/preview_grid",
+                        hx_target="#preview-area",
+                        hx_trigger="input changed delay:300ms",
+                    ),
+                    ft.Button("Створити Шаблон", cls="btn-primary"),
+                    cls="create-editor",
+                ),
+                ft.Div(
+                    ft.Div(
+                        ft.P(
+                            "Введіть елементи (по одному на рядок)",
+                            cls="preview-info",
+                        ),
+                        id="preview-area",
+                    ),
+                    cls="create-preview",
+                ),
+                cls="create-layout",
             ),
-            ft.Button("Створити Шаблон", cls="btn-primary"),
             hx_post="/create_template",
         )
         content = ft.Div(form)
