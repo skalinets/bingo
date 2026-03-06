@@ -8,13 +8,16 @@ from main import (
     create_template_in_db,
     create_user_in_db,
     get_and_delete_challenge,
+    get_and_delete_recovery_token,
     get_bingo_from_db,
     get_credential_by_id,
     get_credentials_for_user,
     get_template_from_db,
-    get_user_by_username,
+    get_user_by_email,
+    get_user_by_id,
     store_challenge,
     store_credential,
+    store_recovery_token,
     toggle_bingo_in_db,
     update_credential_sign_count,
 )
@@ -106,22 +109,22 @@ async def test_toggle_item_in_bingo():
 
 
 async def test_create_user():
-    user_id = await create_user_in_db("testuser", "Test User")
-    user = await get_user_by_username("testuser")
+    user_id = await create_user_in_db("test@example.com", "Test User")
+    user = await get_user_by_email("test@example.com")
     assert user is not None
-    assert user["username"] == "testuser"
+    assert user["email"] == "test@example.com"
     assert user["display_name"] == "Test User"
     assert user["id"] == str(user_id)
 
 
-async def test_duplicate_username_rejected():
-    await create_user_in_db("dupeuser", "First")
+async def test_duplicate_email_rejected():
+    await create_user_in_db("dupe@example.com", "First")
     with pytest.raises(ValueError, match="already taken"):
-        await create_user_in_db("dupeuser", "Second")
+        await create_user_in_db("dupe@example.com", "Second")
 
 
 async def test_store_and_retrieve_credential():
-    user_id = await create_user_in_db("creduser", "Cred User")
+    user_id = await create_user_in_db("cred@example.com", "Cred User")
     await store_credential(
         user_id=user_id,
         credential_id_b64="abc123",
@@ -142,7 +145,7 @@ async def test_store_and_retrieve_credential():
 
 
 async def test_multiple_credentials_per_user():
-    user_id = await create_user_in_db("multikey", "Multi Key")
+    user_id = await create_user_in_db("multi@example.com", "Multi Key")
     await store_credential(user_id, "key1", "pub1", 0)
     await store_credential(user_id, "key2", "pub2", 0)
     creds = await get_credentials_for_user(user_id)
@@ -152,7 +155,7 @@ async def test_multiple_credentials_per_user():
 
 
 async def test_update_credential_sign_count():
-    user_id = await create_user_in_db("signuser", "Sign User")
+    user_id = await create_user_in_db("sign@example.com", "Sign User")
     await store_credential(user_id, "signcred", "pub", 5)
     await update_credential_sign_count("signcred", 10)
     cred = await get_credential_by_id("signcred")
@@ -193,6 +196,37 @@ async def test_bingo_with_user_id():
 
     data = await db.hgetall(f"bingo:{bid}")
     assert data["user_id"] == "99"
+
+
+async def test_get_user_by_id():
+    user_id = await create_user_in_db("byid@example.com", "By ID")
+    user = await get_user_by_id(user_id)
+    assert user is not None
+    assert user["email"] == "byid@example.com"
+    assert user["id"] == str(user_id)
+
+
+async def test_get_user_by_id_not_found():
+    user = await get_user_by_id("99999")
+    assert user is None
+
+
+# --- Recovery token tests ---
+
+
+async def test_store_and_verify_recovery_token():
+    user_id = await create_user_in_db("recover@example.com", "Recover")
+    await store_recovery_token(str(user_id), "recov-tok-123")
+    result = await get_and_delete_recovery_token("recov-tok-123")
+    assert result == str(user_id)
+    # Single-use
+    again = await get_and_delete_recovery_token("recov-tok-123")
+    assert again is None
+
+
+async def test_recovery_token_invalid():
+    result = await get_and_delete_recovery_token("nonexistent-token")
+    assert result is None
 
 
 # --- Route-level auth tests ---
@@ -244,12 +278,17 @@ def test_login_page_public(client):
     assert resp.status_code == 200
 
 
+def test_recover_page_public(client):
+    resp = client.get("/recover")
+    assert resp.status_code == 200
+
+
 # --- WebAuthn ceremony tests (mocked) ---
 
 
 def test_register_begin_returns_json(client):
     with (
-        patch("main.get_user_by_username", new_callable=AsyncMock) as m1,
+        patch("main.get_user_by_email", new_callable=AsyncMock) as m1,
         patch("main.generate_registration_options") as m2,
         patch("main.options_to_json") as m3,
         patch("main.store_challenge", new_callable=AsyncMock),
@@ -261,7 +300,7 @@ def test_register_begin_returns_json(client):
         m3.return_value = '{"challenge":"AAAA"}'
         resp = client.post(
             "/register/begin",
-            data={"username": "newuser", "display_name": "New"},
+            data={"email": "new@example.com", "display_name": "New"},
         )
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/json"
@@ -269,13 +308,13 @@ def test_register_begin_returns_json(client):
 
 def test_login_begin_returns_json(client):
     with (
-        patch("main.get_user_by_username", new_callable=AsyncMock) as m1,
+        patch("main.get_user_by_email", new_callable=AsyncMock) as m1,
         patch("main.get_credentials_for_user", new_callable=AsyncMock) as m2,
         patch("main.generate_authentication_options") as m3,
         patch("main.options_to_json") as m4,
         patch("main.store_challenge", new_callable=AsyncMock),
     ):
-        m1.return_value = {"id": "1", "username": "u"}
+        m1.return_value = {"id": "1", "email": "u@example.com"}
         m2.return_value = [
             {
                 "credential_id": "Y3JlZA",
@@ -288,16 +327,65 @@ def test_login_begin_returns_json(client):
         mock_opts.challenge = b"\x00" * 32
         m3.return_value = mock_opts
         m4.return_value = '{"challenge":"AAAA"}'
-        resp = client.post("/login/begin", data={"username": "u"})
+        resp = client.post("/login/begin", data={"email": "u@example.com"})
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/json"
 
 
 def test_login_unknown_user_fails(client):
-    with patch("main.get_user_by_username", new_callable=AsyncMock) as m1:
+    with patch("main.get_user_by_email", new_callable=AsyncMock) as m1:
         m1.return_value = None
-        resp = client.post("/login/begin", data={"username": "ghost"})
+        resp = client.post("/login/begin", data={"email": "ghost@example.com"})
         assert resp.status_code == 400
+
+
+def test_login_conditional_returns_json(client):
+    with (
+        patch("main.generate_authentication_options") as m1,
+        patch("main.options_to_json") as m2,
+        patch("main.store_challenge", new_callable=AsyncMock),
+    ):
+        mock_opts = MagicMock()
+        mock_opts.challenge = b"\x00" * 32
+        m1.return_value = mock_opts
+        m2.return_value = '{"challenge":"AAAA","allowCredentials":[]}'
+        resp = client.get("/login/conditional")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/json"
+
+
+def test_recovery_send_unknown_email(client):
+    with patch("main.get_user_by_email", new_callable=AsyncMock) as m1:
+        m1.return_value = None
+        resp = client.post("/recover/send", data={"email": "unknown@example.com"})
+        assert resp.status_code == 200
+        assert "Перевірте пошту" in resp.text
+
+
+def test_recovery_verify_invalid_token(client):
+    with patch("main.get_and_delete_recovery_token", new_callable=AsyncMock) as m1:
+        m1.return_value = None
+        resp = client.get("/recover/verify/bad-token", follow_redirects=False)
+        assert resp.status_code == 200
+        assert "недійсне" in resp.text
+
+
+def test_recovery_verify_valid_token(client):
+    with (
+        patch("main.get_and_delete_recovery_token", new_callable=AsyncMock) as m1,
+        patch("main.get_user_by_id", new_callable=AsyncMock) as m2,
+    ):
+        m1.return_value = "42"
+        m2.return_value = {"id": "42", "email": "r@example.com", "display_name": "R"}
+        resp = client.get("/recover/verify/good-token", follow_redirects=False)
+        assert resp.status_code == 303
+        assert "/recover/passkey" in resp.headers.get("location", "")
+
+
+def test_recover_passkey_requires_auth(client):
+    resp = client.get("/recover/passkey", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "/login" in resp.headers.get("location", "")
 
 
 def test_logout_clears_session(client):
